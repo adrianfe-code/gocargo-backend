@@ -64,57 +64,60 @@ app.post('/api/sg/*', async (req, res) => {
 
 // ─── CREAR LINK DE PAGO dLocal Go ─────────
 app.post('/api/payment', async (req, res) => {
-  const { amount, currency, payerName, payerEmail, payerDocument, orderId, description, returnUrl } = req.body;
+  const { amount, currency, payerName, payerEmail, payerDocument, orderId, description } = req.body;
 
   if (!amount || !payerEmail) {
     return res.status(400).json({ error: 'Faltan campos requeridos' });
   }
 
   const payload = {
-    amount:      parseFloat(amount).toFixed(2),
-    currency:    currency || 'UYU',
-    country:     'UY',
-    payment_method_flow: 'REDIRECT',
+    amount:           parseFloat(amount).toFixed(2),
+    currency:         currency || 'UYU',
+    country:          'UY',
+    order_id:         orderId    || `GC-${Date.now()}`,
+    description:      description || 'Envío GoCargo',
+    notification_url: `${process.env.BACKEND_URL}/api/webhook/dlocal`,
+    success_url:      `${process.env.FRONTEND_URL || 'https://whimsical-kheer-eca2e2.netlify.app'}?payment=success&order=${orderId}`,
+    back_url:         `${process.env.FRONTEND_URL || 'https://whimsical-kheer-eca2e2.netlify.app'}?payment=back`,
     payer: {
       name:     payerName || 'Cliente GoCargo',
       email:    payerEmail,
       document: payerDocument || '',
     },
-    order_id:          orderId    || `GC-${Date.now()}`,
-    description:       description || 'Envío GoCargo',
-    success_url:       returnUrl || `${process.env.BACKEND_URL}/payment/success`,
-    back_url:          returnUrl || `${process.env.BACKEND_URL}/payment/back`,
-    notification_url:  `${process.env.BACKEND_URL}/api/webhook/dlocal`,
   };
 
-  const bodyStr = JSON.stringify(payload);
-  const { date, sig } = dlSignature(bodyStr);
+  // dLocal Go usa Basic Auth: Base64(apiKey:secretKey)
+  const credentials = Buffer.from(`${DL_API_KEY}:${DL_SECRET_KEY}`).toString('base64');
 
   try {
-    const dlRes = await fetch(`${DL_API_URL}/payments`, {
+    // dLocal Go API endpoint
+    const dlRes = await fetch('https://api.dlocalgo.com/v1/payments', {
       method: 'POST',
       headers: {
         'Content-Type':  'application/json',
-        'X-Date':        date,
-        'X-Login':       DL_API_KEY,
-        'X-Trans-Key':   DL_SECRET_KEY,
-        'Authorization': `V2-HMAC-SHA256, Signature: ${sig}`,
+        'Authorization': `Basic ${credentials}`,
       },
-      body: bodyStr,
+      body: JSON.stringify(payload),
     });
-    const data = await dlRes.json();
-    if (!dlRes.ok) return res.status(dlRes.status).json({ error: data.message || 'Error dLocal', detail: data });
 
-    // Devolver el link de pago
+    const text = await dlRes.text();
+    console.log('dLocal Go response status:', dlRes.status);
+    console.log('dLocal Go response:', text.substring(0, 500));
+
+    let data;
+    try { data = JSON.parse(text); } catch(e) { data = { error: text }; }
+
+    if (!dlRes.ok) return res.status(dlRes.status).json({ error: data.message || data.error || 'Error dLocal Go', detail: data });
+
     res.json({
       paymentId:   data.id,
       status:      data.status,
-      redirectUrl: data.redirect_url, // URL a donde redirigir al cliente
+      redirectUrl: data.redirect_url,
       amount:      data.amount,
       currency:    data.currency,
     });
   } catch(e) {
-    res.status(500).json({ error: 'Error dLocal: ' + e.message });
+    res.status(500).json({ error: 'Error dLocal Go: ' + e.message });
   }
 });
 

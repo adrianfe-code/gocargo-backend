@@ -13,6 +13,11 @@ const SG_API   = (process.env.SENDGROUND_API  || 'https://api.dev.sendground.com
 const SG_TOKEN = process.env.SENDGROUND_TOKEN || '';
 const SG_APP   = process.env.SENDGROUND_APP_ID || '23';
 
+// dLocal Go credentials
+const DL_API_KEY    = process.env.DLOCAL_API_KEY    || '';
+const DL_SECRET_KEY = process.env.DLOCAL_SECRET_KEY || '';
+const DL_API_URL    = process.env.DLOCAL_API_URL    || 'https://api.dlocal.com';
+
 function sgHeaders() {
   return {
     'Content-Type':     'application/json',
@@ -21,98 +26,95 @@ function sgHeaders() {
   };
 }
 
-// ─── HEALTH ───────────────────────────────
-app.get('/health', (_, res) => res.json({ ok: true, env: process.env.NODE_ENV }));
+// dLocal Go signature: HMAC-SHA256(apiKey + date + requestBody, secretKey)
+function dlSignature(body) {
+  const date    = new Date().toISOString();
+  const message = DL_API_KEY + date + (body || '');
+  const sig     = crypto.createHmac('sha256', DL_SECRET_KEY).update(message).digest('hex');
+  return { date, sig };
+}
 
-// ─── PROXY GENÉRICO GET a SendGround ──────
+// ─── HEALTH ───────────────────────────────
+app.get('/health', (_, res) => res.json({ ok: true }));
+
+// ─── PROXY GET a SendGround ───────────────
 app.get('/api/sg/*', async (req, res) => {
   const path = req.params[0];
   const qs   = new URLSearchParams(req.query).toString();
   const url  = `${SG_API}/c1/${path}${qs ? '?' + qs : ''}`;
-  console.log('SG GET:', url);
-  console.log('SG_API:', SG_API);
-  console.log('SG_TOKEN preview:', SG_TOKEN?.substring(0,20));
   try {
     const r    = await fetch(url, { headers: sgHeaders() });
     const text = await r.text();
-    console.log('SG response status:', r.status);
-    console.log('SG response preview:', text.substring(0, 200));
-    try {
-      res.status(r.status).json(JSON.parse(text));
-    } catch(e) {
-      res.status(500).json({ error: 'Unexpected token < in JSON at position 0', raw: text.substring(0,300) });
-    }
-  } catch(e) {
-    res.status(500).json({ error: e.message });
-  }
+    try { res.status(r.status).json(JSON.parse(text)); }
+    catch(e) { res.status(500).json({ error: 'Invalid JSON from SG', raw: text.substring(0,300) }); }
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// ─── PROXY GENÉRICO POST a SendGround ─────
+// ─── PROXY POST a SendGround ──────────────
 app.post('/api/sg/*', async (req, res) => {
   const path = req.params[0];
   const url  = `${SG_API}/c1/${path}`;
-  console.log('SG POST:', url);
-  console.log('SG POST body:', JSON.stringify(req.body));
   try {
-    const r    = await fetch(url, {
-      method: 'POST',
-      headers: sgHeaders(),
-      body: JSON.stringify(req.body),
-    });
+    const r    = await fetch(url, { method:'POST', headers: sgHeaders(), body: JSON.stringify(req.body) });
     const text = await r.text();
-    console.log('SG POST status:', r.status);
-    console.log('SG POST response:', text.substring(0, 500));
-    try {
-      res.status(r.status).json(JSON.parse(text));
-    } catch(e) {
-      res.status(r.status).json({ error: text.substring(0, 300) });
-    }
-  } catch(e) {
-    res.status(500).json({ error: e.message });
-  }
+    try { res.status(r.status).json(JSON.parse(text)); }
+    catch(e) { res.status(500).json({ error: 'Invalid JSON from SG', raw: text.substring(0,300) }); }
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// ─── PAGO CON DLOCAL ──────────────────────
+// ─── CREAR LINK DE PAGO dLocal Go ─────────
 app.post('/api/payment', async (req, res) => {
-  const { cardToken, amount, currency, payerName, payerEmail, payerDocument, orderId, description } = req.body;
-  if (!cardToken || !amount || !payerEmail) {
+  const { amount, currency, payerName, payerEmail, payerDocument, orderId, description, returnUrl } = req.body;
+
+  if (!amount || !payerEmail) {
     return res.status(400).json({ error: 'Faltan campos requeridos' });
   }
-  const xDate  = new Date().toISOString();
-  const xLogin = process.env.DLOCAL_X_LOGIN || '';
+
   const payload = {
-    amount: parseFloat(amount).toFixed(2),
-    currency: currency || 'UYU',
-    country: 'UY',
-    payment_method_id: 'CARD',
-    payment_method_flow: 'DIRECT',
-    payer: { name: payerName || 'Cliente GoCargo', email: payerEmail, document: payerDocument || '' },
-    card: { token: cardToken },
-    order_id: orderId || `GC-${Date.now()}`,
-    description: description || 'Envío GoCargo',
-    notification_url: `${process.env.BACKEND_URL}/api/webhook/dlocal`,
+    amount:      parseFloat(amount).toFixed(2),
+    currency:    currency || 'UYU',
+    country:     'UY',
+    payment_method_flow: 'REDIRECT',
+    payer: {
+      name:     payerName || 'Cliente GoCargo',
+      email:    payerEmail,
+      document: payerDocument || '',
+    },
+    order_id:          orderId    || `GC-${Date.now()}`,
+    description:       description || 'Envío GoCargo',
+    success_url:       returnUrl || `${process.env.BACKEND_URL}/payment/success`,
+    back_url:          returnUrl || `${process.env.BACKEND_URL}/payment/back`,
+    notification_url:  `${process.env.BACKEND_URL}/api/webhook/dlocal`,
   };
-  const message = xLogin + xDate + JSON.stringify(payload);
-  const hmac    = crypto.createHmac('sha256', process.env.DLOCAL_SECRET_KEY || '').update(message).digest('hex');
+
+  const bodyStr = JSON.stringify(payload);
+  const { date, sig } = dlSignature(bodyStr);
+
   try {
-    const dlRes = await fetch(
-      `${process.env.DLOCAL_API_URL || 'https://sandbox.dlocal.com'}/payments`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Date': xDate, 'X-Login': xLogin,
-          'X-Trans-Key': process.env.DLOCAL_X_TRANS_KEY || '',
-          'Authorization': `V2-HMAC-SHA256, Signature: ${hmac}`,
-        },
-        body: JSON.stringify(payload),
-      }
-    );
+    const dlRes = await fetch(`${DL_API_URL}/payments`, {
+      method: 'POST',
+      headers: {
+        'Content-Type':  'application/json',
+        'X-Date':        date,
+        'X-Login':       DL_API_KEY,
+        'X-Trans-Key':   DL_SECRET_KEY,
+        'Authorization': `V2-HMAC-SHA256, Signature: ${sig}`,
+      },
+      body: bodyStr,
+    });
     const data = await dlRes.json();
     if (!dlRes.ok) return res.status(dlRes.status).json({ error: data.message || 'Error dLocal', detail: data });
-    res.json({ paymentId: data.id, status: data.status, amount: data.amount, currency: data.currency });
+
+    // Devolver el link de pago
+    res.json({
+      paymentId:   data.id,
+      status:      data.status,
+      redirectUrl: data.redirect_url, // URL a donde redirigir al cliente
+      amount:      data.amount,
+      currency:    data.currency,
+    });
   } catch(e) {
-    res.status(500).json({ error: 'Error procesando pago: ' + e.message });
+    res.status(500).json({ error: 'Error dLocal: ' + e.message });
   }
 });
 
@@ -120,6 +122,21 @@ app.post('/api/payment', async (req, res) => {
 app.post('/api/webhook/dlocal', (req, res) => {
   console.log('dLocal webhook:', JSON.stringify(req.body));
   res.status(200).send('OK');
+});
+
+// ─── PÁGINAS DE RETORNO ───────────────────
+app.get('/payment/success', (_, res) => {
+  res.send(`<html><body><script>
+    window.opener?.postMessage({type:'PAYMENT_SUCCESS'}, '*');
+    window.close();
+  </script><p>Pago exitoso. Podés cerrar esta ventana.</p></body></html>`);
+});
+
+app.get('/payment/back', (_, res) => {
+  res.send(`<html><body><script>
+    window.opener?.postMessage({type:'PAYMENT_BACK'}, '*');
+    window.close();
+  </script><p>Pago cancelado.</p></body></html>`);
 });
 
 app.listen(PORT, () => console.log(`✅ GoCargo backend en :${PORT}`));

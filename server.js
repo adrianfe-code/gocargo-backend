@@ -71,7 +71,7 @@ app.post('/api/payment', async (req, res) => {
   }
 
   const payload = {
-    amount:           parseFloat(amount).toFixed(2),
+    amount:           parseFloat(parseFloat(amount).toFixed(2)),
     currency:         currency || 'UYU',
     country:          'UY',
     order_id:         orderId    || `GC-${Date.now()}`,
@@ -85,6 +85,8 @@ app.post('/api/payment', async (req, res) => {
       document: payerDocument || '',
     },
   };
+
+  console.log('dLocal Go payload:', JSON.stringify(payload));
 
   // dLocal Go usa Basic Auth: Base64(apiKey:secretKey)
   const credentials = Buffer.from(`${DL_API_KEY}:${DL_SECRET_KEY}`).toString('base64');

@@ -73,14 +73,13 @@ app.post('/api/payment', async (req, res) => {
   const payload = {
     amount:           parseFloat(parseFloat(amount).toFixed(2)),
     currency:         currency || 'UYU',
-    country:          'UY',
     order_id:         orderId    || `GC-${Date.now()}`,
     description:      description || 'Envío GoCargo',
     notification_url: `${process.env.BACKEND_URL}/api/webhook/dlocal`,
     success_url:      `${process.env.FRONTEND_URL || 'https://whimsical-kheer-eca2e2.netlify.app'}?payment=success&order=${orderId}`,
     back_url:         `${process.env.FRONTEND_URL || 'https://whimsical-kheer-eca2e2.netlify.app'}?payment=back`,
     payer: {
-      name:     payerName || 'Cliente GoCargo',
+      name:     payerName || 'Cliente',
       email:    payerEmail,
       document: payerDocument || '',
     },

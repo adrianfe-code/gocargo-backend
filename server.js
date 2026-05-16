@@ -51,14 +51,22 @@ app.get('/api/sg/*', async (req, res) => {
 app.post('/api/sg/*', async (req, res) => {
   const path = req.params[0];
   const url  = `${SG_API}/c1/${path}`;
+  console.log('SG POST:', url);
+  console.log('SG POST body:', JSON.stringify(req.body));
   try {
-    const r = await fetch(url, {
+    const r    = await fetch(url, {
       method: 'POST',
       headers: sgHeaders(),
       body: JSON.stringify(req.body),
     });
-    const data = await r.json();
-    res.status(r.status).json(data);
+    const text = await r.text();
+    console.log('SG POST status:', r.status);
+    console.log('SG POST response:', text.substring(0, 500));
+    try {
+      res.status(r.status).json(JSON.parse(text));
+    } catch(e) {
+      res.status(r.status).json({ error: text.substring(0, 300) });
+    }
   } catch(e) {
     res.status(500).json({ error: e.message });
   }

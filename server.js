@@ -9,7 +9,7 @@ const PORT = process.env.PORT || 3001;
 app.use(cors({ origin: '*' }));
 app.use(express.json());
 
-const SG_API   = process.env.SENDGROUND_API  || 'https://gocargo.dev.sendground.com';
+const SG_API   = (process.env.SENDGROUND_API  || 'https://api.dev.sendground.com').replace(/\/$/, '');
 const SG_TOKEN = process.env.SENDGROUND_TOKEN || '';
 const SG_APP   = process.env.SENDGROUND_APP_ID || '23';
 

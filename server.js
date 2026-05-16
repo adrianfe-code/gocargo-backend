@@ -29,10 +29,19 @@ app.get('/api/sg/*', async (req, res) => {
   const path = req.params[0];
   const qs   = new URLSearchParams(req.query).toString();
   const url  = `${SG_API}/c1/${path}${qs ? '?' + qs : ''}`;
+  console.log('SG GET:', url);
+  console.log('SG_API:', SG_API);
+  console.log('SG_TOKEN preview:', SG_TOKEN?.substring(0,20));
   try {
-    const r = await fetch(url, { headers: sgHeaders() });
-    const data = await r.json();
-    res.status(r.status).json(data);
+    const r    = await fetch(url, { headers: sgHeaders() });
+    const text = await r.text();
+    console.log('SG response status:', r.status);
+    console.log('SG response preview:', text.substring(0, 200));
+    try {
+      res.status(r.status).json(JSON.parse(text));
+    } catch(e) {
+      res.status(500).json({ error: 'Unexpected token < in JSON at position 0', raw: text.substring(0,300) });
+    }
   } catch(e) {
     res.status(500).json({ error: e.message });
   }

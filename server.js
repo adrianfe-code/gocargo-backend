@@ -147,10 +147,29 @@ app.post('/api/webhook/dlocal', async (req, res) => {
   console.log('dLocal webhook FULL body:', JSON.stringify(req.body, null, 2));
   res.status(200).send('OK'); // Responder rápido a dLocal
 
-  // dLocal Go puede mandar el status en distintos campos
-  const order_id  = req.body.order_id  || req.body.order?.id;
-  const paymentId = req.body.id        || req.body.payment_id;
-  const status    = req.body.status    || req.body.payment_status;
+  // dLocal solo manda payment_id — hay que consultar la API para obtener order_id y status
+  const paymentId = req.body.payment_id || req.body.id;
+  if (!paymentId) {
+    console.log('Webhook sin payment_id, ignorado');
+    return;
+  }
+
+  console.log(`Consultando dLocal por payment_id=${paymentId}...`);
+  const credentials = Buffer.from(`${DL_API_KEY}:${DL_SECRET_KEY}`).toString('base64');
+
+  let order_id, status;
+  try {
+    const dlRes = await fetch(`https://api.dlocalgo.com/v1/payments/${paymentId}`, {
+      headers: { 'Authorization': `Basic ${credentials}` }
+    });
+    const dlData = await dlRes.json();
+    console.log('dLocal payment data:', JSON.stringify(dlData));
+    order_id = dlData.order_id;
+    status   = dlData.status;
+  } catch(e) {
+    console.error('Error consultando dLocal:', e.message);
+    return;
+  }
 
   console.log(`Webhook — order_id=${order_id} paymentId=${paymentId} status=${status}`);
 

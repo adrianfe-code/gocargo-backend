@@ -11,12 +11,14 @@ const PORT = process.env.PORT || 3001;
 app.use(cors({ origin: '*' }));
 app.use(express.json());
 
-const SG_API   = (process.env.SENDGROUND_API  || 'https://api.dev.sendground.com').replace(/\/$/, '');
-const SG_TOKEN = process.env.SENDGROUND_TOKEN || '';
-const SG_APP   = process.env.SENDGROUND_APP_ID || '23';
+const SG_API         = (process.env.SENDGROUND_API  || 'https://api.sendground.com').replace(/\/$/, '');
+const SG_TOKEN       = process.env.SENDGROUND_TOKEN || '';
+const SG_APP         = process.env.SENDGROUND_APP_ID || '23';
+const SG_TOKEN_ADMIN = process.env.SENDGROUND_TOKEN_ADMIN || '';
+const SG_APP_ADMIN   = '25';
 const DL_API_KEY    = process.env.DLOCAL_API_KEY    || '';
 const DL_SECRET_KEY = process.env.DLOCAL_SECRET_KEY || '';
-const FRONTEND_URL  = process.env.FRONTEND_URL || 'https://whimsical-kheer-eca2e2.netlify.app';
+const FRONTEND_URL  = process.env.FRONTEND_URL || 'https://pedidos.gocargo.com.uy';
 const BACKEND_URL   = process.env.BACKEND_URL  || '';
 
 // ─── PEDIDOS PENDIENTES (memoria + archivo) ─
@@ -60,8 +62,28 @@ function sgHeaders() {
   };
 }
 
+function sgAdminHeaders() {
+  return {
+    'Content-Type':     'application/json',
+    'Authorization':    `Bearer ${SG_TOKEN_ADMIN}`,
+    'X-Application-Id': SG_APP_ADMIN,
+  };
+}
+
 // ─── HEALTH ───────────────────────────────
 app.get('/health', (_, res) => res.json({ ok: true, pending: Object.keys(pendingOrders).length }));
+
+// ─── TRACKER — buscar pedido por código (token admin) ─
+app.get('/api/track/:code', async (req, res) => {
+  const code = req.params.code;
+  try {
+    const r    = await fetch(`${SG_API}/c1/Orders/code/${encodeURIComponent(code)}`, { headers: sgAdminHeaders() });
+    const text = await r.text();
+    if (!r.ok) return res.status(404).json({ error: 'Pedido no encontrado' });
+    try { res.json(JSON.parse(text)); }
+    catch(e) { res.status(500).json({ error: 'Invalid JSON', raw: text.substring(0,300) }); }
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
 
 // ─── PROXY GET a SendGround ───────────────
 app.get('/api/sg/*', async (req, res) => {

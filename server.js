@@ -144,13 +144,19 @@ app.post('/api/payment', async (req, res) => {
 
 // ─── WEBHOOK dLocal — crear pedido al confirmar pago ─
 app.post('/api/webhook/dlocal', async (req, res) => {
-  console.log('dLocal webhook received:', JSON.stringify(req.body));
+  console.log('dLocal webhook FULL body:', JSON.stringify(req.body, null, 2));
   res.status(200).send('OK'); // Responder rápido a dLocal
 
-  const { order_id, status, id: paymentId } = req.body;
+  // dLocal Go puede mandar el status en distintos campos
+  const order_id  = req.body.order_id  || req.body.order?.id;
+  const paymentId = req.body.id        || req.body.payment_id;
+  const status    = req.body.status    || req.body.payment_status;
+
+  console.log(`Webhook — order_id=${order_id} paymentId=${paymentId} status=${status}`);
 
   // Solo procesar pagos exitosos
-  if (status !== 'PAID' && status !== 'APPROVED') {
+  const PAID_STATUSES = ['PAID', 'APPROVED', 'paid', 'approved', 'COMPLETED', 'completed'];
+  if (!PAID_STATUSES.includes(status)) {
     console.log(`Webhook ignorado: status=${status}`);
     return;
   }
@@ -173,30 +179,49 @@ app.post('/api/webhook/dlocal', async (req, res) => {
 
     if (r.ok) {
       console.log(`✅ Pedido creado en SendGround: ${data.code || data.id}`);
-      removePending(order_id);
+      // Guardar datos del pedido de SendGround para que el frontend pueda consultarlos
+      pendingOrders[order_id] = {
+        ...pending,
+        sgOrder: {
+          id:               data.id,
+          code:             data.code,
+          shippingLabelUrl: data.shippingLabelUrl || null,
+        },
+        paidAt: new Date().toISOString(),
+      };
+      savePending(pendingOrders);
+      // Limpiar después de 1 hora
+      setTimeout(() => removePending(order_id), 60 * 60 * 1000);
     } else {
       console.error(`❌ Error creando pedido en SendGround:`, JSON.stringify(data));
-      // No removemos el pending para poder reintentar
     }
   } catch(e) {
     console.error('Error creando pedido en SendGround:', e.message);
   }
 });
 
-// ─── VERIFICAR ESTADO DE PAGO (para el frontend) ─
-app.get('/api/payment/status/:orderId', async (req, res) => {
-  const { orderId } = req.params;
-  const credentials = Buffer.from(`${DL_API_KEY}:${DL_SECRET_KEY}`).toString('base64');
+// ─── VERIFICAR ESTADO DEL PEDIDO (polling desde frontend) ─
+app.get('/api/order/status/:dlocalOrderId', async (req, res) => {
+  const { dlocalOrderId } = req.params;
+  const pending = getPending(dlocalOrderId);
 
-  try {
-    const r    = await fetch(`https://api.dlocalgo.com/v1/payments/order_id/${orderId}`, {
-      headers: { 'Authorization': `Basic ${credentials}` }
+  if (pending?.sgOrder) {
+    // Pedido ya creado en SendGround
+    return res.json({
+      status: 'CREATED',
+      orderCode:       pending.sgOrder.code,
+      orderId:         pending.sgOrder.id,
+      shippingLabelUrl: pending.sgOrder.shippingLabelUrl || null,
     });
-    const data = await r.json();
-    res.json({ status: data.status, paymentId: data.id, amount: data.amount });
-  } catch(e) {
-    res.status(500).json({ error: e.message });
   }
+
+  if (pending) {
+    // Todavía pendiente
+    return res.json({ status: 'PENDING' });
+  }
+
+  // No encontrado — puede que ya se procesó y se limpió
+  return res.json({ status: 'UNKNOWN' });
 });
 
 app.listen(PORT, () => console.log(`✅ GoCargo backend en :${PORT}`));

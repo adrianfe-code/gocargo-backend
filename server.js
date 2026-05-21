@@ -242,13 +242,23 @@ app.post('/api/webhook/dlocal', async (req, res) => {
   }
 
   console.log(`✅ Pago confirmado para ${orderId} — creando pedido en SendGround...`);
-  console.log('OrderPayload:', JSON.stringify(pending.orderPayload, null, 2));
+
+  // Siempre usar el customerId del token JWT, ignorar lo que vino del frontend
+  let correctCustomerId = 118;
+  try {
+    const tokenPayload = JSON.parse(Buffer.from(SG_TOKEN.split('.')[1], 'base64').toString());
+    if (tokenPayload.customerId) correctCustomerId = parseInt(tokenPayload.customerId);
+  } catch(e) { console.warn('No se pudo extraer customerId del token:', e.message); }
+
+  const orderPayload = { ...pending.orderPayload, customerId: correctCustomerId };
+  console.log(`Usando customerId=${correctCustomerId} (del token JWT)`);
+  console.log('OrderPayload:', JSON.stringify(orderPayload, null, 2));
 
   try {
     const r = await fetch(`${SG_API}/c1/Orders`, {
       method:  'POST',
       headers: sgHeaders(),
-      body:    JSON.stringify(pending.orderPayload),
+      body:    JSON.stringify(orderPayload),
     });
     const text = await r.text();
     console.log(`SG create order — status=${r.status} body=${text.substring(0,400)}`);

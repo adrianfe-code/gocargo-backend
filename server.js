@@ -65,6 +65,30 @@ function sgHeaders() {
   };
 }
 
+// ─── RASTREO DE PEDIDOS (token admin) ───────
+const SG_TOKEN_ADMIN = process.env.SENDGROUND_TOKEN_ADMIN || '';
+const SG_APP_ADMIN   = '25';
+
+function sgHeadersAdmin() {
+  return {
+    'Content-Type':     'application/json',
+    'Authorization':    `Bearer ${SG_TOKEN_ADMIN}`,
+    'X-Application-Id': SG_APP_ADMIN,
+  };
+}
+
+app.get('/api/track/:code', async (req, res) => {
+  const { code } = req.params;
+  const url = `${SG_API}/c1/Orders/code/${code}`;
+  console.log('TRACK GET:', url);
+  try {
+    const r    = await fetch(url, { headers: sgHeadersAdmin() });
+    const text = await r.text();
+    try { res.status(r.status).json(JSON.parse(text)); }
+    catch(e) { res.status(500).json({ error: 'Invalid JSON', raw: text.substring(0,300) }); }
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 // ─── HEALTH ───────────────────────────────
 app.get('/health', (_, res) => res.json({
   ok: true,

@@ -244,7 +244,7 @@ app.post('/api/webhook/dlocal', async (req, res) => {
   console.log(`✅ Pago confirmado para ${orderId} — creando pedido en SendGround...`);
 
   // Siempre usar el customerId del token JWT, ignorar lo que vino del frontend
-  let correctCustomerId = 118;
+  let correctCustomerId = 604; // fallback producción
   try {
     const tokenPayload = JSON.parse(Buffer.from(SG_TOKEN.split('.')[1], 'base64').toString());
     if (tokenPayload.customerId) correctCustomerId = parseInt(tokenPayload.customerId);

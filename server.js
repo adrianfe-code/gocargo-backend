@@ -62,6 +62,7 @@ function sgHeaders() {
     'Content-Type':     'application/json',
     'Authorization':    `Bearer ${SG_TOKEN}`,
     'X-Application-Id': SG_APP,
+    'Accept-Language':  'es',
   };
 }
 
@@ -74,6 +75,7 @@ function sgHeadersAdmin() {
     'Content-Type':     'application/json',
     'Authorization':    `Bearer ${SG_TOKEN_ADMIN}`,
     'X-Application-Id': SG_APP_ADMIN,
+    'Accept-Language':  'es',
   };
 }
 

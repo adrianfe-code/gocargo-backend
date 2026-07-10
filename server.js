@@ -25,6 +25,34 @@ app.use(cors({
   }
 }));
 
+// ─── RATE LIMITING ──────────────────────────
+const rateLimitMap = new Map();
+function rateLimit(maxRequests, windowMs) {
+  return (req, res, next) => {
+    const key = req.ip || req.headers['x-forwarded-for'] || 'unknown';
+    const now = Date.now();
+    const entry = rateLimitMap.get(key) || { count: 0, start: now };
+    if (now - entry.start > windowMs) {
+      entry.count = 1;
+      entry.start = now;
+    } else {
+      entry.count++;
+    }
+    rateLimitMap.set(key, entry);
+    if (entry.count > maxRequests) {
+      return res.status(429).json({ error: 'Demasiadas solicitudes. Intentá de nuevo en unos minutos.' });
+    }
+    next();
+  };
+}
+// Limpiar el mapa cada 10 minutos para evitar memory leaks
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of rateLimitMap.entries()) {
+    if (now - entry.start > 10 * 60 * 1000) rateLimitMap.delete(key);
+  }
+}, 10 * 60 * 1000);
+
 // ─── BODY PARSING ────────────────────────────
 app.use((req, res, next) => {
   if (req.path === '/api/webhook/dlocal') {
@@ -95,7 +123,7 @@ function removePending(id) { delete pendingOrders[id]; savePending(pendingOrders
 app.get('/health', (_, res) => res.json({ ok: true }));
 
 // ─── RASTREO ─────────────────────────────────
-app.get('/api/track/:code', async (req, res) => {
+app.get('/api/track/:code', rateLimit(30, 60_000), async (req, res) => {
   const { code } = req.params;
   const url = `${SG_API}/c1/Orders/code/${encodeURIComponent(code)}`;
   console.log('TRACK GET:', url);
@@ -130,7 +158,7 @@ app.get('/api/priorities', async (req, res) => {
 });
 
 // ─── COTIZACIÓN ──────────────────────────────
-app.post('/api/quote', async (req, res) => {
+app.post('/api/quote', rateLimit(20, 60_000), async (req, res) => {
   const url = `${SG_API}/c1/Orders/Quotes`;
   try {
     const r    = await fetch(url, { method: 'POST', headers: sgHeaders(), body: JSON.stringify(req.body) });
@@ -141,7 +169,7 @@ app.post('/api/quote', async (req, res) => {
 });
 
 // ─── GEOCODIFICACIÓN (proxy Google Maps) ─────
-app.get('/api/geocode', async (req, res) => {
+app.get('/api/geocode', rateLimit(30, 60_000), async (req, res) => {
   const { address } = req.query;
   if (!address) return res.status(400).json({ error: 'Falta el parámetro address' });
   const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${GOOGLE_MAPS_KEY}&language=es&region=UY`;
@@ -164,7 +192,7 @@ app.get('/api/customer-id', (req, res) => {
 });
 
 // ─── INICIAR PAGO ────────────────────────────
-app.post('/api/payment', async (req, res) => {
+app.post('/api/payment', rateLimit(10, 60_000), async (req, res) => {
   const { amount, currency, payerName, payerEmail, payerDocument, orderPayload, description } = req.body;
 
   if (!amount || !payerEmail || !orderPayload) {

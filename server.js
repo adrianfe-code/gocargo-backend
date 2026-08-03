@@ -114,6 +114,18 @@ app.get('/api/track/:code', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── QUOTE (cotización de precios) ────────
+app.post('/api/quote', async (req, res) => {
+  const url = `${SG_API}/c1/Orders/Quotes`;
+  try {
+    const r    = await fetch(url, { method:'POST', headers: sgHeaders(), body: JSON.stringify(req.body) });
+    const text = await r.text();
+    console.log(`Quote status: ${r.status} preview: ${text.substring(0,200)}`);
+    try { res.status(r.status).json(JSON.parse(text)); }
+    catch(e) { res.status(500).json({ error: 'Invalid JSON', raw: text.substring(0,300) }); }
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 // ─── CUSTOMER ID desde token JWT ──────────
 app.get('/api/customer-id', (req, res) => {
   try {

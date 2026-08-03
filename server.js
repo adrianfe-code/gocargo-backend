@@ -8,7 +8,16 @@ const path    = require('path');
 const app  = express();
 const PORT = process.env.PORT || 3001;
 
-app.use(cors({ origin: '*' }));
+app.use(cors({
+  origin: [
+    'https://pedidos.gocargo.com.uy',
+    'https://go-cargo-pedidos-dec13.web.app',
+    'https://go-cargo-pedidos-dec13.firebaseapp.com',
+    'http://localhost:5000',
+    'http://localhost:3000',
+  ],
+  credentials: true
+}));
 app.use(express.json());
 
 const SG_API         = (process.env.SENDGROUND_API  || 'https://api.sendground.com').replace(/\/$/, '');

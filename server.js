@@ -114,6 +114,27 @@ app.get('/api/track/:code', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── SHORTCUTS para package-types y priorities ─
+app.get('/api/package-types', async (req, res) => {
+  const url = `${SG_API}/c1/Packages/Types?limit=50`;
+  try {
+    const r = await fetch(url, { headers: sgHeaders() });
+    const text = await r.text();
+    try { res.status(r.status).json(JSON.parse(text)); }
+    catch(e) { res.status(500).json({ error: 'Invalid JSON', raw: text.substring(0,300) }); }
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/priorities', async (req, res) => {
+  const url = `${SG_API}/c1/Orders/Priorities?limit=20`;
+  try {
+    const r = await fetch(url, { headers: sgHeaders() });
+    const text = await r.text();
+    try { res.status(r.status).json(JSON.parse(text)); }
+    catch(e) { res.status(500).json({ error: 'Invalid JSON', raw: text.substring(0,300) }); }
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 // ─── PROXY GET a SendGround ───────────────
 app.get('/api/sg/*', async (req, res) => {
   const path = req.params[0];

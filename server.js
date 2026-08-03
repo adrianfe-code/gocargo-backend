@@ -114,6 +114,16 @@ app.get('/api/track/:code', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── CUSTOMER ID desde token JWT ──────────
+app.get('/api/customer-id', (req, res) => {
+  try {
+    const payload = JSON.parse(Buffer.from(SG_TOKEN.split('.')[1], 'base64').toString());
+    res.json({ customerId: parseInt(payload.customerId) || 604 });
+  } catch(e) {
+    res.json({ customerId: 604 });
+  }
+});
+
 // ─── SHORTCUTS para package-types y priorities ─
 app.get('/api/package-types', async (req, res) => {
   const url = `${SG_API}/c1/Packages/Types?limit=50`;

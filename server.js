@@ -45,15 +45,15 @@ app.use((req, res, next) => {
 });
 
 // ─── VARIABLES DE ENTORNO ─────────────────
-const SG_API         = (process.env.SENDGROUND_API || 'https://api.sendground.com').replace(/\/$/, '');
-const SG_TOKEN       = process.env.SENDGROUND_TOKEN || '';
-const SG_APP         = process.env.SENDGROUND_APP_ID || '23';
-const SG_TOKEN_ADMIN = process.env.SENDGROUND_TOKEN_ADMIN || '';
-const SG_APP_ADMIN   = '25';
-const DL_API_KEY     = process.env.DLOCAL_API_KEY    || '';
-const DL_SECRET_KEY  = process.env.DLOCAL_SECRET_KEY || '';
-const FRONTEND_URL   = process.env.FRONTEND_URL || 'https://pedidos.gocargo.com.uy';
-const BACKEND_URL    = (process.env.BACKEND_URL || '').replace(/\/$/, '');
+const SG_API          = (process.env.SENDGROUND_API || 'https://api.sendground.com').replace(/\/$/, '');
+const SG_TOKEN        = process.env.SENDGROUND_TOKEN || '';
+const SG_APP          = process.env.SENDGROUND_APP_ID || '23';
+const SG_TOKEN_ADMIN  = process.env.SENDGROUND_TOKEN_ADMIN || '';
+const SG_APP_ADMIN    = '25';
+const DL_API_KEY      = process.env.DLOCAL_API_KEY    || '';
+const DL_SECRET_KEY   = process.env.DLOCAL_SECRET_KEY || '';
+const FRONTEND_URL    = process.env.FRONTEND_URL || 'https://pedidos.gocargo.com.uy';
+const BACKEND_URL     = (process.env.BACKEND_URL || '').replace(/\/$/, '');
 const GOOGLE_MAPS_KEY = process.env.GOOGLE_MAPS_KEY || '';
 
 // ─── HEADERS SENGROUND ────────────────────
@@ -128,9 +128,8 @@ app.get('/api/track/:code', rateLimit(30, 60_000), async (req, res) => {
 
 // ─── TIPOS DE PAQUETE ─────────────────────
 app.get('/api/package-types', rateLimit(30, 60_000), async (req, res) => {
-  const url = `${SG_API}/c1/Packages/Types?limit=50`;
   try {
-    const r    = await fetch(url, { headers: sgHeaders() });
+    const r    = await fetch(`${SG_API}/c1/Packages/Types?limit=50`, { headers: sgHeaders() });
     const text = await r.text();
     try { res.status(r.status).json(JSON.parse(text)); }
     catch(e) { res.status(500).json({ error: 'Invalid JSON' }); }
@@ -139,9 +138,8 @@ app.get('/api/package-types', rateLimit(30, 60_000), async (req, res) => {
 
 // ─── PRIORIDADES ─────────────────────────
 app.get('/api/priorities', rateLimit(30, 60_000), async (req, res) => {
-  const url = `${SG_API}/c1/Orders/Priorities?limit=20`;
   try {
-    const r    = await fetch(url, { headers: sgHeaders() });
+    const r    = await fetch(`${SG_API}/c1/Orders/Priorities?limit=20`, { headers: sgHeaders() });
     const text = await r.text();
     try { res.status(r.status).json(JSON.parse(text)); }
     catch(e) { res.status(500).json({ error: 'Invalid JSON' }); }
@@ -150,9 +148,8 @@ app.get('/api/priorities', rateLimit(30, 60_000), async (req, res) => {
 
 // ─── COTIZACIÓN ───────────────────────────
 app.post('/api/quote', rateLimit(20, 60_000), async (req, res) => {
-  const url = `${SG_API}/c1/Orders/Quotes`;
   try {
-    const r    = await fetch(url, { method: 'POST', headers: sgHeaders(), body: JSON.stringify(req.body) });
+    const r    = await fetch(`${SG_API}/c1/Orders/Quotes`, { method: 'POST', headers: sgHeaders(), body: JSON.stringify(req.body) });
     const text = await r.text();
     console.log(`Quote status: ${r.status} preview: ${text.substring(0,200)}`);
     try { res.status(r.status).json(JSON.parse(text)); }
@@ -164,8 +161,8 @@ app.post('/api/quote', rateLimit(20, 60_000), async (req, res) => {
 app.get('/api/geocode', rateLimit(30, 60_000), async (req, res) => {
   const { address } = req.query;
   if (!address) return res.status(400).json({ error: 'Falta el parámetro address' });
-  const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${GOOGLE_MAPS_KEY}&language=es&region=UY`;
   try {
+    const url  = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${GOOGLE_MAPS_KEY}&language=es&region=UY`;
     const r    = await fetch(url);
     const text = await r.text();
     try { res.status(r.status).json(JSON.parse(text)); }
@@ -177,13 +174,14 @@ app.get('/api/geocode', rateLimit(30, 60_000), async (req, res) => {
 app.get('/api/distance', rateLimit(30, 60_000), async (req, res) => {
   const { orig, dest } = req.query;
   if (!orig || !dest) return res.status(400).json({ error: 'orig y dest requeridos' });
-  const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${orig}&destinations=${dest}&mode=driving&key=${GOOGLE_MAPS_KEY}`;
   try {
+    const url  = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${orig}&destinations=${dest}&mode=driving&key=${GOOGLE_MAPS_KEY}`;
     const r    = await fetch(url);
     const data = await r.json();
     if (data.status === 'OK' && data.rows[0]?.elements[0]?.status === 'OK') {
       res.json({ km: data.rows[0].elements[0].distance.value / 1000 });
     } else {
+      console.error('Distance Matrix error:', data.status, JSON.stringify(data.rows?.[0]?.elements?.[0]));
       res.status(500).json({ error: 'Google Distance Matrix error', status: data.status });
     }
   } catch(e) { res.status(500).json({ error: e.message }); }
@@ -281,7 +279,11 @@ app.post('/api/webhook/dlocal', async (req, res) => {
     const data = await r.json();
     if (r.ok) {
       console.log(`✅ Pedido creado: ${data.code}`);
-      pendingOrders[order_id] = { ...pending, sgOrder: { id: data.id, code: data.code, shippingLabelUrl: data.shippingLabelUrl || null }, paidAt: new Date().toISOString() };
+      pendingOrders[order_id] = {
+        ...pending,
+        sgOrder: { id: data.id, code: data.code, shippingLabelUrl: data.shippingLabelUrl || null },
+        paidAt: new Date().toISOString()
+      };
       savePending(pendingOrders);
       setTimeout(() => removePending(order_id), 60 * 60 * 1000);
     } else {

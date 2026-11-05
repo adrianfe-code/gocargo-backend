@@ -10,6 +10,7 @@ const PORT = process.env.PORT || 3001;
 // ─── CORS ─────────────────────────────────
 const ALLOWED_ORIGINS = [
   'https://pedidos.gocargo.com.uy',
+  'https://uespanel.gocargo.com.uy',
   'https://gocargo-rastreo.netlify.app',
   'https://gocargo.com.uy',
   'https://go-cargo-pedidos-dec13.web.app',

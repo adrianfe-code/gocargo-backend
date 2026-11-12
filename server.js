@@ -56,6 +56,11 @@ const DL_SECRET_KEY   = process.env.DLOCAL_SECRET_KEY || '';
 const FRONTEND_URL    = process.env.FRONTEND_URL || 'https://pedidos.gocargo.com.uy';
 const BACKEND_URL     = (process.env.BACKEND_URL || '').replace(/\/$/, '');
 const GOOGLE_MAPS_KEY = process.env.GOOGLE_MAPS_KEY || '';
+// Independiente del Google Maps legacy de Pedidos Online.
+// La clave de Routes del Cotizador nunca reemplaza GOOGLE_MAPS_KEY.
+const GOOGLE_ROUTES_API_KEY = process.env.GOOGLE_ROUTES_API_KEY || '';
+const COTIZADOR_SUPABASE_URL = 'https://gdobmjcmunxvioodcgbj.supabase.co';
+const COTIZADOR_SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_yngYFd42DbU490x8nIKBQQ_KAf4BdyI';
 
 // ─── HEADERS SENGROUND ────────────────────
 function sgHeaders() {
@@ -186,6 +191,93 @@ app.get('/api/distance', rateLimit(30, 60_000), async (req, res) => {
       res.status(500).json({ error: 'Google Distance Matrix error', status: data.status });
     }
   } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── COTIZADOR GOCARGO: ROUTES API AISLADA ────────
+// No usa ni modifica GOOGLE_MAPS_KEY /api/distance /api/geocode de Pedidos.
+// Requiere sesión Supabase + membresía activa para limitar consumo facturable.
+const freightRoutesCache=new Map();
+async function verifyCotizadorAccess(token){
+  if(typeof token!=='string'||token.length<60||token.length>4096) return false;
+  const headers={apikey:COTIZADOR_SUPABASE_PUBLISHABLE_KEY,Authorization:'Bearer '+token};
+  const userResponse=await fetch(COTIZADOR_SUPABASE_URL+'/auth/v1/user',{headers,signal:AbortSignal.timeout(8000)});
+  if(!userResponse.ok)return false;
+  const user=await userResponse.json();
+  if(!user?.id||typeof user.id!=='string')return false;
+  const query='?select=empresa_id&user_id=eq.'+encodeURIComponent(user.id)+'&activo=eq.true&limit=1';
+  const memberResponse=await fetch(COTIZADOR_SUPABASE_URL+'/rest/v1/empresa_usuarios'+query,{headers,signal:AbortSignal.timeout(8000)});
+  if(!memberResponse.ok)return false;
+  const members=await memberResponse.json();
+  return Array.isArray(members)&&members.length>0;
+}
+async function computeGoogleRoutesDistance(origin,destination){
+  const response=await fetch('https://routes.googleapis.com/directions/v2:computeRoutes',{
+    method:'POST',
+    headers:{
+      'Content-Type':'application/json',
+      'X-Goog-Api-Key':GOOGLE_ROUTES_API_KEY,
+      'X-Goog-FieldMask':'routes.distanceMeters'
+    },
+    body:JSON.stringify({
+      origin:{address:origin},
+      destination:{address:destination},
+      travelMode:'DRIVE',
+      routingPreference:'TRAFFIC_UNAWARE',
+      computeAlternativeRoutes:false,
+      languageCode:'es',
+      units:'METRIC'
+    }),
+    signal:AbortSignal.timeout(12000)
+  });
+  if(!response.ok){
+    console.warn('Routes API respondió:',response.status);
+    const error=new Error('Google Routes no pudo calcular uno de los trayectos.');
+    error.status=response.status===400?422:502;
+    throw error;
+  }
+  const body=await response.json();
+  const meters=body?.routes?.[0]?.distanceMeters;
+  if(!Number.isFinite(meters)||meters<=0||meters>100000000){
+    const error=new Error('Google Routes no devolvió una distancia válida.');
+    error.status=422;
+    throw error;
+  }
+  return meters;
+}
+app.post('/api/cotizador/flete-ruta',rateLimit(12,60_000),async(req,res)=>{
+  res.set('Cache-Control','no-store');
+  if(!GOOGLE_ROUTES_API_KEY)return res.status(503).json({error:'Falta configurar GOOGLE_ROUTES_API_KEY en Railway.'});
+  const token=String(req.headers.authorization||'').replace(/^Bearer\s+/i,'');
+  if(!token)return res.status(401).json({error:'Iniciá sesión en GoCargo Cotizador para calcular recorridos.'});
+  const origin=typeof req.body?.origin==='string'?req.body.origin.trim():'';
+  const destination=typeof req.body?.destination==='string'?req.body.destination.trim():'';
+  if(origin.length<4||destination.length<4||origin.length>180||destination.length>180||origin.toLowerCase()===destination.toLowerCase())
+    return res.status(400).json({error:'Ingresá dos direcciones distintas y válidas (origen y destino).'});
+  try{
+    const permitted=await verifyCotizadorAccess(token);
+    if(!permitted)return res.status(403).json({error:'Usuario no autorizado para consultar rutas de GoCargo.'});
+    const key=origin.toLowerCase()+'\n'+destination.toLowerCase();
+    const cached=freightRoutesCache.get(key);
+    if(cached&&Date.now()-cached.timestamp<3600000)
+      return res.json({...cached.data,cached:true});
+    const [outbound,returnMeters]=await Promise.all([
+      computeGoogleRoutesDistance(origin,destination),
+      computeGoogleRoutesDistance(destination,origin)
+    ]);
+    const data={
+      idaKm:Math.round(outbound/100)/10,
+      vueltaKm:Math.round(returnMeters/100)/10,
+      totalKm:Math.round((outbound+returnMeters)/100)/10,
+      source:'Google Routes API',
+      routeType:'ida_y_vuelta'
+    };
+    freightRoutesCache.set(key,{data,timestamp:Date.now()});
+    if(freightRoutesCache.size>400)freightRoutesCache.delete(freightRoutesCache.keys().next().value);
+    return res.json(data);
+  }catch(err){
+    console.warn('No se pudo calcular ruta de flete:',err.status||err.name||'unknown');
+    return res.status(err.status||502).json({error:err.status?err.message:'No se pudo consultar Google Routes. Verificá las direcciones o intentá más tarde.'});
+  }
 });
 
 // ─── CUSTOMER ID ─────────────────────────
